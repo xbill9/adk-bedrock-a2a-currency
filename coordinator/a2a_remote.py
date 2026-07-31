@@ -1,10 +1,14 @@
 """RemoteCurrencyAgent implementation backed by the a2a-sdk 1.x client.
 
 Speaks A2A v1.0 (a2a-sdk >= 1.0 wire methods) to a remote agent such as the
-benchmark ADK agent in ``adk_agent/``, with no coordinator-framework
-dependency. The remote agent is prompted to answer with one JSON quote object
-per target currency; parsing is kept in pure functions so it can be tested
-without a network or credentials.
+Strands worker hosted on Bedrock AgentCore Runtime (``app/CurrencyWorker/``),
+with no coordinator-framework dependency. The remote agent is prompted to
+answer with one JSON quote object per target currency; parsing is kept in pure
+functions so it can be tested without a network or credentials.
+
+AgentCore's A2A runtime is protected by a CUSTOM_JWT authorizer, so an optional
+``token_provider`` supplies a Google-issued OIDC bearer token per call. See
+``coordinator/gcp_identity.py``.
 """
 
 import asyncio
@@ -106,15 +110,27 @@ class A2ARemoteCurrencyAgent:
         self,
         endpoint: str,
         *,
-        source: str = "adk-a2a",
+        source: str = "agentcore-a2a",
         timeout_s: float = 120.0,
+        token_provider=None,
     ) -> None:
         self._endpoint = endpoint
         self._source = source
         self._timeout_s = timeout_s
+        self._token_provider = token_provider
+
+    async def _auth_headers(self) -> dict[str, str]:
+        """Mint the bearer header AgentCore's JWT authorizer expects, if any."""
+        if self._token_provider is None:
+            return {}
+        return {"Authorization": f"Bearer {await self._token_provider.token()}"}
 
     async def _send(self, prompt: str) -> str:
         """Resolve the agent card, send one text message, and gather reply text."""
+        # Mint credentials before touching the transport: an unauthenticated
+        # call would only be rejected at the far end anyway.
+        headers = await self._auth_headers()
+
         from a2a.client import A2ACardResolver, ClientConfig, create_client
         from a2a.helpers import get_message_text, get_text_parts, new_text_message
         from a2a.types import Role, SendMessageRequest
@@ -122,13 +138,16 @@ class A2ARemoteCurrencyAgent:
         # local_address pins the socket to IPv4; IPv6 to some hosts hangs in
         # some sandboxes (same workaround as FrankfurterRateProvider).
         transport = httpx.AsyncHTTPTransport(local_address="0.0.0.0")
-        async with httpx.AsyncClient(timeout=self._timeout_s, transport=transport) as httpx_client:
+        async with httpx.AsyncClient(
+            timeout=self._timeout_s, transport=transport, headers=headers
+        ) as httpx_client:
             resolver = A2ACardResolver(httpx_client=httpx_client, base_url=self._endpoint)
             card = await resolver.get_agent_card()
-            # ADK's to_a2a() advertises the server's bind address (e.g.
-            # http://127.0.0.1:8080) on the card, and the a2a-sdk client
-            # routes transport by card URL. Rewrite the interfaces to the
-            # endpoint we were configured with.
+            # Agent cards routinely advertise the server's own bind address
+            # (ADK's to_a2a() emits http://127.0.0.1:8080; a Strands A2AServer
+            # behind the AgentCore proxy advertises its container URL), and the
+            # a2a-sdk client routes transport by card URL. Rewrite the
+            # interfaces to the endpoint we were configured with.
             for interface in card.supported_interfaces:
                 interface.url = self._endpoint
             client = await create_client(
@@ -173,6 +192,10 @@ class A2ARemoteCurrencyAgent:
                 FailureKind.TRANSPORT,
                 f"cannot reach A2A endpoint {self._endpoint}: {exc}",
             ) from exc
+        except AdapterError:
+            # Already classified (e.g. AUTHENTICATION from the token provider);
+            # do not let the catch-all below relabel it as a protocol failure.
+            raise
         except Exception as exc:  # a2a-sdk raises protocol errors of varied types
             raise AdapterError(
                 FailureKind.PROTOCOL,

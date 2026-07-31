@@ -3,8 +3,14 @@ from decimal import Decimal
 
 import pytest
 
-from coordinator.a2a_remote import build_prompt, extract_json_objects, parse_quotes
+from coordinator.a2a_remote import (
+    A2ARemoteCurrencyAgent,
+    build_prompt,
+    extract_json_objects,
+    parse_quotes,
+)
 from coordinator.errors import AdapterError, FailureKind
+from coordinator.gcp_identity import StaticTokenProvider
 from coordinator.models import ConversionRequest
 
 OBSERVED = datetime(2026, 7, 27, tzinfo=UTC)
@@ -72,3 +78,35 @@ def test_parse_quotes_rejects_conversational_refusal():
             observed_at=OBSERVED,
         )
     assert excinfo.value.kind is FailureKind.PROTOCOL
+
+
+@pytest.mark.asyncio
+async def test_auth_headers_are_empty_without_a_token_provider():
+    agent = A2ARemoteCurrencyAgent("https://worker.example")
+
+    assert await agent._auth_headers() == {}
+
+
+@pytest.mark.asyncio
+async def test_auth_headers_carry_the_provider_token():
+    agent = A2ARemoteCurrencyAgent(
+        "https://worker.example", token_provider=StaticTokenProvider("google-oidc-token")
+    )
+
+    assert await agent._auth_headers() == {"Authorization": "Bearer google-oidc-token"}
+
+
+@pytest.mark.asyncio
+async def test_authentication_failures_are_not_relabelled_as_protocol_errors():
+    """A failed token mint must stay AUTHENTICATION through convert()'s
+    catch-all, otherwise the benchmark misattributes an auth problem."""
+
+    class FailingProvider:
+        async def token(self) -> str:
+            raise AdapterError(FailureKind.AUTHENTICATION, "metadata server said no")
+
+    agent = A2ARemoteCurrencyAgent("https://worker.example", token_provider=FailingProvider())
+
+    with pytest.raises(AdapterError) as excinfo:
+        await agent.convert(request("EUR"))
+    assert excinfo.value.kind is FailureKind.AUTHENTICATION

@@ -20,9 +20,12 @@ agentcore/aws-targets.json
 agentcore/.cli/logs/
 cdk.out/
 # Build artifacts synced into the app bundle by infra/sync_app.sh
-app/CurrencyCoordinator/.venv/
-app/CurrencyCoordinator/coordinator/
-app/CurrencyCoordinator/mcp_server/
+app/CurrencyWorker/.venv/
+app/CurrencyWorker/coordinator/
+app/CurrencyWorker/mcp_server/
+# Build artifacts synced into the Cloud Run source by infra/sync_adk.sh
+adk_agent/coordinator/
+adk_agent/mcp_server/
 adk_agent/.venv/
 adk_agent/agent.log
 node_modules/

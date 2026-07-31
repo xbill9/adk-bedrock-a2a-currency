@@ -1,14 +1,14 @@
 [project]
-name = "benchmark-adk-agent"
-version = "0.1.0"
-description = "Minimal Google ADK currency agent exposed over A2A v1.0 for the interoperability benchmark"
+name = "benchmark-adk-coordinator"
+version = "0.2.0"
+description = "Google ADK master agent coordinating MCP and an AWS AgentCore A2A worker"
 requires-python = ">=3.13"
 dependencies = [
     "google-adk[a2a]==2.5.0",
+    # The benchmark tool is an A2A *client* of the AgentCore worker.
     "a2a-sdk>=1.1,<2",
     "python-dotenv>=1.1.0",
     "uvicorn>=0.35.0",
-    "mcp>=1.28.1",
-    "fastmcp>=3.4.4",
     "httpx>=0.28.1",
+    "pydantic>=2.10",
 ]

@@ -1,10 +1,18 @@
-"""Minimal ADK currency agent served over A2A v1.0 for the benchmark.
+"""Google ADK master agent for the currency interoperability benchmark.
 
-Derived from xbill9/currency-agent@aeef3c4 with the A2UI extension removed:
-a2ui-agent-sdk pins a2a-sdk<0.4 (A2A v0.3.0 wire methods), which A2A v1.0
-clients (a2a-sdk>=1.0, e.g. the Bedrock coordinator's adapter) cannot call.
-Removing A2UI lets this agent run google-adk 2.5.0 with a2a-sdk 1.x and answer
-in plain text parts, which is also what the benchmark needs to parse quotes.
+This is the GCP half of the flipped topology. The ADK agent is now the
+coordinator: it owns the benchmark modes, calls the MCP exchange-rate tool
+directly, and delegates independent verification to the Strands worker hosted
+on Amazon Bedrock AgentCore Runtime over A2A v1.0.
+
+Authentication to AgentCore is keyless. Cloud Run's metadata server mints a
+Google-issued OIDC token for the runtime service account, and AgentCore's
+CUSTOM_JWT authorizer validates it against Google's discovery document. The
+container holds no AWS credentials; see ``coordinator/gcp_identity.py``.
+
+The ``coordinator/`` package in this directory is a copy of the repo-root
+package, synced by ``infra/sync_adk.sh`` before deploy so the Cloud Run source
+upload is self-contained. Edit the root package, not the copy.
 """
 
 import logging
@@ -13,44 +21,47 @@ import os
 from dotenv import load_dotenv
 from google.adk.a2a.utils.agent_to_a2a import to_a2a
 from google.adk.agents import LlmAgent
-from google.adk.tools.mcp_tool import McpToolset, StreamableHTTPConnectionParams
 from starlette.responses import JSONResponse
+
+from coordinator.hosted_tool import run_currency_benchmark
 
 logging.basicConfig(format="[%(levelname)s]: %(message)s", level=logging.INFO)
 
 load_dotenv()
 
+# Carried over from the Strands master prompt this replaces: the model routes
+# and reports, it never does arithmetic. Source labels are the only evidence of
+# whether a result is live.
 INSTRUCTION = (
-    "You are a specialized assistant for currency conversions. "
-    "Your sole purpose is to use the 'get_exchange_rate' tool to answer questions about "
-    "currency exchange rates. "
-    "When asked to convert an amount, call the tool for each requested target currency, then "
-    "reply with exactly one JSON object per line of the form "
-    '{"source_currency": "<ISO code>", "target_currency": "<ISO code>", '
-    '"rate": <decimal>, "converted_amount": <decimal>} '
-    "and no other text. "
-    "If the user asks about anything other than currency conversion or exchange rates, "
-    "politely state that you cannot help with that topic."
+    "You are the Google ADK master agent for a currency interoperability "
+    "benchmark, not a general chatbot. The Amazon Bedrock AgentCore worker is "
+    "your remote agent and is reached by the benchmark tool over A2A. "
+    "For every conversion request, call run_currency_benchmark. Never calculate or "
+    "verify arithmetic yourself. Determine whether results are live only from each "
+    "returned source field: sources containing 'deterministic-fixture' or "
+    "'hosted-local' are non-live; do not label other sources as fixtures. Preserve "
+    "the returned amounts, rates, timestamps, failure labels, and warnings exactly. "
+    "Parse 'Convert 100 USD to EUR' as amount='100', source_currency='USD', and "
+    "target_currencies=['EUR']; every currency listed after 'to' is a target. "
+    "Never ask the user to confirm information already present in the request. "
+    "Ask for amount, source currency, or target currencies only when truly missing."
 )
 
 root_agent = LlmAgent(
     model=os.getenv("GENAI_MODEL", "gemini-2.5-flash"),
-    name="currency_agent",
-    description="An agent that answers currency conversion questions with structured quotes",
+    name="currency_coordinator",
+    description=(
+        "Master agent that benchmarks MCP tool calls against an AWS-hosted "
+        "remote agent and returns structured, verified conversion results"
+    ),
     instruction=INSTRUCTION,
-    tools=[
-        McpToolset(
-            connection_params=StreamableHTTPConnectionParams(
-                url=os.getenv("MCP_SERVER_URL", "http://127.0.0.1:8081/mcp")
-            ),
-        ),
-    ],
+    tools=[run_currency_benchmark],
 )
 
 a2a_app = to_a2a(
     root_agent,
     host=os.getenv("HOST", "127.0.0.1"),
-    port=int(os.getenv("PORT", "10001")),
+    port=int(os.getenv("PORT", "8080")),
 )
 
 

@@ -1,12 +1,12 @@
 #!/bin/bash
 # Copy the framework-independent packages into the AgentCore app directory so
 # the CodeZip bundle is self-contained (the runtime cannot import from outside
-# app/CurrencyCoordinator/). Run before `agentcore deploy`. The copies are
+# app/CurrencyWorker/). Run before `agentcore deploy`. The copies are
 # build artifacts: edit the repo-root packages, never the copies.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP_DIR="$REPO_ROOT/app/CurrencyCoordinator"
+APP_DIR="$REPO_ROOT/app/CurrencyWorker"
 
 for pkg in coordinator mcp_server; do
   rm -rf "$APP_DIR/$pkg"

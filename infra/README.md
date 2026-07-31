@@ -1,16 +1,24 @@
-# AgentCore deployment
+# Cross-cloud deployment (GCP master → AWS worker)
 
-Deploy the coordinator to Amazon Bedrock AgentCore Runtime with the AgentCore
-CLI (`npm install -g @aws/agentcore`, Node 20+, CDK-based). The hosted
-coordinator uses the AgentCore execution role and the AWS credential chain;
-do not commit API keys.
+Deploy the A2A worker to Amazon Bedrock AgentCore Runtime with the AgentCore
+CLI (`npm install -g @aws/agentcore`, Node 20+, CDK-based), and the ADK master
+to Cloud Run. The worker uses the AgentCore execution role; the master carries
+no AWS credentials at all. Do not commit API keys.
+
+`infra/deploy_live.sh` drives both halves in dependency order. Run it twice:
+the first pass creates the coordinator's service account and deploys the
+worker, then stops and asks for `AGENTCORE_A2A_ENDPOINT` (the CLI's output
+format is not stable enough to parse blindly); the second pass deploys the
+coordinator against that endpoint.
 
 Provision only the MVP resources:
 
-- AgentCore Runtime hosting the Strands coordinator (`main.py`);
-- Bedrock model access for the chosen Claude inference profile;
+- AgentCore Runtime hosting the Strands A2A worker (`main.py`);
+- a `CUSTOM_JWT` authorizer trusting Google's OIDC discovery document;
+- Bedrock model access for the chosen inference profile;
 - the CLI-created IAM execution role and CloudWatch log group;
-- CDK bootstrap assets (S3 staging for CodeZip builds).
+- CDK bootstrap assets (S3 staging for CodeZip builds);
+- a GCP service account for the coordinator plus the Gemini key secret.
 
 Candidate deployment versions researched on 2026-07-28 (re-pin after the
 first verified end-to-end deployment):
@@ -33,28 +41,39 @@ June 2026; use the npm CLI.
 
 The AgentCore project was created on 2026-07-28 with
 `agentcore create --framework Strands --protocol HTTP --model-provider Bedrock
---memory none` and relocated into the repo root:
+--memory none` and relocated into the repo root. It was switched to
+`"protocol": "A2A"` on 2026-07-30 when the topology was reversed:
 
 - `agentcore/agentcore.json` — project config, including the runtime `envVars`
-  for the live cross-cloud loop (committed);
+  and the `CUSTOM_JWT` authorizer (committed);
 - `agentcore/aws-targets.json` — account-specific deployment target generated
   locally by `infra/configure_aws_target.sh` and excluded from Git;
 - `agentcore/.env.local`, `agentcore/.cli/` — local state (not committed);
-- `app/CurrencyCoordinator/` — the deployable app: `main.py`
-  (`BedrockAgentCoreApp` entrypoint), `model/load.py`, its own
-  `pyproject.toml`/`uv.lock`, plus copies of `coordinator/` and `mcp_server/`
-  synced by `infra/sync_app.sh` (the copies are build artifacts; edit the
-  repo-root packages).
+- `app/CurrencyWorker/` — the deployable app: `main.py` (a2a-sdk 1.x server
+  wrapping a Strands agent), `model/load.py`, its own `pyproject.toml`/
+  `uv.lock`, plus copies of `coordinator/` and `mcp_server/` synced by
+  `infra/sync_app.sh` (the copies are build artifacts; edit the repo-root
+  packages);
+- `adk_agent/` — the Cloud Run master, with copies synced by
+  `infra/sync_adk.sh`.
 
 ## Deploy and smoke-test
 
 ```bash
+export GCP_PROJECT=my-project
 ./infra/configure_aws_target.sh       # uses the active AWS profile/account
-./infra/sync_app.sh                   # refresh the app's package copies
-agentcore deploy -y                   # CDK deploy; prints the runtime ARN
-agentcore status
-agentcore invoke "Convert 100 USD to EUR in verified mode."
+./infra/deploy_live.sh                # SA + secret + AgentCore worker
+export AGENTCORE_A2A_ENDPOINT="https://..."   # from the `agentcore status` output
+./infra/deploy_live.sh                # Cloud Run coordinator
+
+export CURRENCY_COORDINATOR_ENDPOINT="https://currency-adk-coordinator-....run.app"
+python3 -m evaluations.invoke_hosted "Convert 100 USD to EUR in verified mode."
 ```
+
+The worker is not directly invocable with `agentcore invoke` in a useful way
+any more: with `"protocol": "A2A"` it speaks JSON-RPC, and its authorizer
+accepts only Google-issued tokens carrying the coordinator's email claim.
+Drive the loop from the coordinator instead.
 
 Select a non-default profile or region through the standard AWS environment
 variables before configuring and deploying:
@@ -69,18 +88,48 @@ agentcore deploy -y
 The generated target file contains the caller's AWS account ID and must remain
 local. Run the configuration script again when switching profiles or regions.
 
+## Worker configuration (AWS)
+
 Runtime environment variables live in `agentcore/agentcore.json` under
 `runtimes[0].envVars`:
 
-- `CURRENCY_A2A_ENDPOINT` — Cloud Run URL of the ADK agent
-- `CURRENCY_REQUIRE_GCP_ADK=1` — fail closed for `a2a_only` and `verified`
-  when the Cloud Run endpoint is missing
-- `CURRENCY_RATE_PROVIDER=frankfurter`
-- `CURRENCY_RATE_TRANSPORT=mcp-stdio`
-- `CURRENCY_TIMEOUT_SECONDS=60` (Cloud Run cold starts exceed the 10 s default)
+- `CURRENCY_RATE_PROVIDER=frankfurter` — the worker's own rate source
 - `BEDROCK_MODEL_ID` — override of the default inference profile
 - `BEDROCK_MAX_TOKENS=1024` — explicit output cap for predictable Bedrock
   quota usage
+
+The worker no longer carries `CURRENCY_A2A_ENDPOINT`: it is the remote agent,
+not the caller.
+
+Inbound authorization lives beside it under `runtimes[0]`:
+
+- `authorizerType: "CUSTOM_JWT"`
+- `authorizerConfiguration.customJwtAuthorizer.discoveryUrl` — Google's OIDC
+  discovery document
+- `.allowedAudience` — must equal the coordinator's `CURRENCY_A2A_AUDIENCE`
+- `.customClaims[0]` — pins the coordinator service account's `email`.
+  `deploy_live.sh` substitutes the real address for
+  `REPLACE_WITH_COORDINATOR_SERVICE_ACCOUNT_EMAIL`. Left unsubstituted, the
+  authorizer matches nothing and rejects every call — deliberately the safe
+  failure direction.
+
+## Coordinator configuration (GCP)
+
+Set on the Cloud Run service by `deploy_live.sh`:
+
+- `CURRENCY_A2A_ENDPOINT` — the AgentCore runtime's A2A URL
+- `CURRENCY_A2A_AUDIENCE` — audience requested from the metadata server
+- `CURRENCY_REQUIRE_AWS_AGENTCORE=1` — fail closed for `a2a_only` and
+  `verified` when the endpoint is missing
+- `CURRENCY_RATE_PROVIDER=frankfurter`, `CURRENCY_RATE_TRANSPORT=mcp-stdio`
+- `CURRENCY_TIMEOUT_SECONDS=60` (cross-cloud cold starts exceed the 10 s default)
+- `GENAI_MODEL=gemini-2.5-flash`, `GOOGLE_API_KEY` from Secret Manager
+
+## Historical baseline: AWS master → GCP worker
+
+The results below were recorded before the 2026-07-30 reversal, when the
+AgentCore runtime was the coordinator and the ADK agent the worker. They are
+retained as the comparison target; no live GCP → AWS run has been recorded yet.
 
 Observed deployment result on 2026-07-28:
 
@@ -117,19 +166,35 @@ Observed smoke test on 2026-07-29 after making Bedrock the explicit master:
   regression test was added, and the redeployed request called the benchmark
   tool without asking for confirmation.
 
-Historical baseline: the same benchmark ran hosted on Microsoft Foundry on
+Earlier baseline: the same benchmark ran hosted on Microsoft Foundry on
 2026-07-27 (all three modes completed; verified mode agreed exactly with
-relative_difference 0; mcp_only elapsed 0.71 s, verified 2.7 s). That result
-is retained as the comparison target for the first AgentCore run; no AWS
-end-to-end result has been recorded yet.
+relative_difference 0; mcp_only elapsed 0.71 s, verified 2.7 s).
+
+## Known unknowns for the first GCP → AWS run
+
+Verify these against live infrastructure before trusting the reversed loop:
+
+- The exact A2A endpoint URL AgentCore fronts an `A2A`-protocol runtime with.
+  `deploy_live.sh` requires it as `AGENTCORE_A2A_ENDPOINT` rather than guessing.
+- Whether AgentCore's proxy forwards the `Authorization` header to the
+  container or strips it after the authorizer runs. The worker does not read it
+  either way, but it affects what shows up in logs.
+- Whether Google's `email` claim is present on metadata-server tokens for the
+  chosen `audience` format. If not, pin `sub` (the service account's numeric ID)
+  instead.
+
+## Script configuration
 
 `deploy_live.sh` intentionally contains no project ID or key path. Set
-`GCP_PROJECT`; optionally set `GCP_REGION`, `CURRENCY_A2A_SERVICE`,
-`GEMINI_SECRET_NAME`, and `GEMINI_KEY_FILE`. `GEMINI_KEY_FILE` is used only
-when creating a missing Secret Manager secret.
+`GCP_PROJECT`; optionally set `GCP_REGION`, `CURRENCY_COORDINATOR_SERVICE`,
+`CURRENCY_COORDINATOR_SA_NAME`, `CURRENCY_A2A_AUDIENCE`, `GEMINI_SECRET_NAME`,
+and `GEMINI_KEY_FILE`. `GEMINI_KEY_FILE` is used only when creating a missing
+Secret Manager secret.
 
 Before deployment, verify the latest official instructions:
 
 - https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-cli.html
+- https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-inbound-auth.html
 - https://github.com/aws/agentcore-cli
 - https://strandsagents.com/docs/user-guide/quickstart/python/
+- https://cloud.google.com/run/docs/securing/service-identity

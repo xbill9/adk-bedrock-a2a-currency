@@ -78,44 +78,65 @@ only `agreed: false` should be case `a2a-disagreement`).
 
 ## Tier 3 — cross-cloud from the local coordinator
 
-Requires the Cloud Run deployment (`infra/deploy_live.sh` steps 1–2, or see
-`adk_agent/README.md`). The deployment script requires `GCP_PROJECT`; it never
-stores a project ID or local key path in Git.
+Requires the AgentCore worker deployment (`infra/deploy_live.sh` through step
+2). The local CLI stands in for the Cloud Run master and calls the AWS worker
+directly.
+
+Because the metadata server is unavailable off Cloud Run, mint a token by hand.
+The audience must match `allowedAudience` in `agentcore/agentcore.json`, and the
+authorizer pins the *coordinator service account's* email — so impersonate that
+account rather than using your own user identity:
 
 ```bash
-A2A_URL=$(gcloud run services describe currency-adk-a2a \
-  --region us-central1 --format='value(status.url)')
-curl -s "$A2A_URL/health"
+export CURRENCY_A2A_BEARER_TOKEN=$(gcloud auth print-identity-token \
+  --impersonate-service-account="currency-coordinator@${GCP_PROJECT}.iam.gserviceaccount.com" \
+  --audiences=currencybench-agentcore-worker)
+
 CURRENCY_RATE_PROVIDER=frankfurter currency-benchmark 250 GBP USD JPY \
   --mode verified --transport mcp-stdio \
-  --a2a-endpoint "$A2A_URL" --timeout-seconds 60
+  --a2a-endpoint "$AGENTCORE_A2A_ENDPOINT" --timeout-seconds 60
 ```
 
-Keep `--timeout-seconds 60`: a Cloud Run cold start plus multi-target
-generation exceeds the 10 s default, and cold starts can also produce
-partial replies (typed as `protocol` failures — rerun once warm before
-concluding anything is broken).
+`CURRENCY_A2A_BEARER_TOKEN` bypasses the metadata server entirely; without it
+the run fails with an `authentication` error rather than falling back to a
+fixture.
 
-## Tier 4 — fully hosted (AWS -> GCP)
+Keep `--timeout-seconds 60`: a cold start plus multi-target generation exceeds
+the 10 s default, and cold starts can also produce partial replies (typed as
+`protocol` failures — rerun once warm before concluding anything is broken).
 
-Requires the full deployment (`infra/deploy_live.sh`) and AWS credentials
-with `bedrock-agentcore:InvokeAgentRuntime` on the runtime ARN (see
+## Tier 4 — fully hosted (GCP -> AWS)
+
+Requires the full deployment (`infra/deploy_live.sh`). No AWS credentials are
+needed on the caller: the benchmark drives the Cloud Run coordinator, which
+authenticates to AgentCore with a Google OIDC token of its own (see
 `infra/README.md`).
 
 ```bash
-export AGENTCORE_RUNTIME_ARN="arn:aws:bedrock-agentcore:REGION:ACCOUNT:runtime/NAME"
+export CURRENCY_COORDINATOR_ENDPOINT="https://currency-adk-coordinator-....run.app"
 python3 -m evaluations.invoke_hosted "Convert 500 EUR to USD and CHF in verified mode."
 python3 -m evaluations.invoke_hosted "Convert 500 EUR to USD in mcp_only mode."
 python3 -m evaluations.invoke_hosted "Convert 500 EUR to USD in a2a_only mode."
 ```
 
+If the Cloud Run service was deployed without `--allow-unauthenticated`, also
+set `CURRENCY_COORDINATOR_TOKEN=$(gcloud auth print-identity-token)`.
+
 Expect the verified run to include `"agreed": true` with sources
-`mcp-stdio:frankfurter-live` (rates fetched inside the AgentCore container)
-and `gcp-adk-a2a-worker` (the Cloud Run agent). This exercises every hop: SigV4
-auth, the AgentCore invocation contract, Nova Micro tool selection on
-Bedrock, MCP stdio, and the cross-cloud A2A v1.0 call to Gemini. The
-equivalent Azure-hosted tier passed on 2026-07-27; the AWS leg passed on
-2026-07-28 (all three modes, verified mode in agreement).
+`mcp-stdio:frankfurter-live` (rates fetched inside the Cloud Run container)
+and `aws-agentcore-a2a-worker` (the Bedrock agent). This exercises every hop:
+the Google OIDC mint, AgentCore's CUSTOM_JWT authorizer, Gemini tool selection,
+MCP stdio, and the cross-cloud A2A v1.0 call to Nova Micro.
+
+**Not yet run in this direction.** The equivalent Azure-hosted tier passed on
+2026-07-27 and the AWS-master leg on 2026-07-28; the reversed loop has not been
+exercised live. Treat a first failure here as an unknown, not a regression —
+`infra/README.md` lists the specific unverified assumptions.
+
+Authentication failures are reported as `authentication`, distinct from
+`protocol`, so a rejected token is not mistaken for a wire-format problem. A 403
+from the authorizer most likely means the `email` claim was never substituted
+into `agentcore/agentcore.json`, or the audience does not match.
 
 ## Known transient failures
 - Empty-message provider timeouts locally — IPv6 hang; the provider pins

@@ -58,8 +58,14 @@ async def _run(args: argparse.Namespace) -> int:
     )
     if args.a2a_endpoint:
         from coordinator.a2a_remote import A2ARemoteCurrencyAgent
+        from coordinator.gcp_identity import token_provider_from_env
 
-        remote_agent = A2ARemoteCurrencyAgent(args.a2a_endpoint)
+        # Off Cloud Run the metadata server is unreachable, so a hand-minted
+        # CURRENCY_A2A_BEARER_TOKEN is the usual way to reach a protected
+        # AgentCore worker from a laptop. None means an unauthenticated agent.
+        remote_agent = A2ARemoteCurrencyAgent(
+            args.a2a_endpoint, token_provider=token_provider_from_env()
+        )
     else:
         remote_agent = DeterministicCurrencyAdapter(provider, source="local-a2a")
     coordinator = CurrencyCoordinator(rate_tool, remote_agent, timeout_seconds=args.timeout_seconds)

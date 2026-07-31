@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "CurrencyWorker"
+version = "0.1.0"
+description = "AgentCore Runtime A2A worker agent using the Strands SDK"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "aws-opentelemetry-distro",
+    "botocore[crt] >= 1.35.0",
+    # Deliberately NOT strands-agents[a2a]: that extra pins a2a-sdk<0.4 (A2A
+    # v0.3 wire methods), which the ADK coordinator's a2a-sdk 1.x client cannot
+    # call. Strands is the agent loop only; the A2A v1.0 server surface comes
+    # from a2a-sdk directly. See the module docstring in main.py.
+    "strands-agents >= 1.15.0",
+    "a2a-sdk[http-server] >= 1.1.2",
+    "uvicorn >= 0.35.0",
+    "httpx >= 0.28",
+    "pydantic >= 2.10",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]

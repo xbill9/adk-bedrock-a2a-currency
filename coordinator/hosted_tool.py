@@ -1,9 +1,9 @@
 """Function tool exposed to the hosted coordinator.
 
 Defaults to deterministic fixture adapters so local tests run without credentials.
-Hosted deployments set ``CURRENCY_REQUIRE_GCP_ADK=1`` so a missing
-``CURRENCY_A2A_ENDPOINT`` fails closed instead of silently replacing the GCP
-ADK worker with a fixture.
+Hosted deployments set ``CURRENCY_REQUIRE_AWS_AGENTCORE=1`` so a missing
+``CURRENCY_A2A_ENDPOINT`` fails closed instead of silently replacing the AWS
+AgentCore worker with a fixture.
 """
 
 import json
@@ -55,22 +55,29 @@ async def run_currency_benchmark(
     else:
         rate_tool = DeterministicCurrencyAdapter(provider, source="hosted-local-mcp")
     a2a_endpoint = os.getenv("CURRENCY_A2A_ENDPOINT", "").strip()
-    require_gcp_adk = os.getenv("CURRENCY_REQUIRE_GCP_ADK", "").strip().lower() in {
+    require_agentcore = os.getenv("CURRENCY_REQUIRE_AWS_AGENTCORE", "").strip().lower() in {
         "1",
         "true",
         "yes",
     }
     if a2a_endpoint:
         from coordinator.a2a_remote import A2ARemoteCurrencyAgent
+        from coordinator.gcp_identity import token_provider_from_env
 
-        remote_agent = A2ARemoteCurrencyAgent(a2a_endpoint, source="gcp-adk-a2a-worker")
-    elif require_gcp_adk and benchmark_mode is not BenchmarkMode.MCP_ONLY:
+        # AgentCore's CUSTOM_JWT authorizer expects a Google-issued OIDC token;
+        # None here means an unauthenticated endpoint (local worker in tests).
+        remote_agent = A2ARemoteCurrencyAgent(
+            a2a_endpoint,
+            source="aws-agentcore-a2a-worker",
+            token_provider=token_provider_from_env(),
+        )
+    elif require_agentcore and benchmark_mode is not BenchmarkMode.MCP_ONLY:
         return json.dumps(
             {
-                "error": "gcp_adk_not_configured",
+                "error": "agentcore_not_configured",
                 "detail": (
                     "CURRENCY_A2A_ENDPOINT is required when "
-                    "CURRENCY_REQUIRE_GCP_ADK is enabled"
+                    "CURRENCY_REQUIRE_AWS_AGENTCORE is enabled"
                 ),
             }
         )

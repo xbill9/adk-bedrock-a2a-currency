@@ -9,21 +9,36 @@
   },
   "runtimes": [
     {
-      "name": "CurrencyCoordinator",
+      "name": "CurrencyWorker",
       "build": "CodeZip",
       "entrypoint": "main.py",
-      "codeLocation": "app/CurrencyCoordinator/",
+      "codeLocation": "app/CurrencyWorker/",
       "runtimeVersion": "PYTHON_3_14",
       "networkMode": "PUBLIC",
-      "protocol": "HTTP",
+      "protocol": "A2A",
+      "authorizerType": "CUSTOM_JWT",
+      "authorizerConfiguration": {
+        "customJwtAuthorizer": {
+          "discoveryUrl": "https://accounts.google.com/.well-known/openid-configuration",
+          "allowedAudience": ["currencybench-agentcore-worker"],
+          "customClaims": [
+            {
+              "inboundTokenClaimName": "email",
+              "inboundTokenClaimValueType": "STRING",
+              "authorizingClaimMatchValue": {
+                "claimMatchOperator": "EQUALS",
+                "claimMatchValue": {
+                  "matchValueString": "REPLACE_WITH_COORDINATOR_SERVICE_ACCOUNT_EMAIL"
+                }
+              }
+            }
+          ]
+        }
+      },
       "envVars": [
         { "name": "BEDROCK_MODEL_ID", "value": "us.amazon.nova-micro-v1:0" },
         { "name": "BEDROCK_MAX_TOKENS", "value": "1024" },
-        { "name": "CURRENCY_A2A_ENDPOINT", "value": "https://currency-adk-a2a-wgcq55zbfq-uc.a.run.app" },
-        { "name": "CURRENCY_REQUIRE_GCP_ADK", "value": "1" },
-        { "name": "CURRENCY_RATE_PROVIDER", "value": "frankfurter" },
-        { "name": "CURRENCY_RATE_TRANSPORT", "value": "mcp-stdio" },
-        { "name": "CURRENCY_TIMEOUT_SECONDS", "value": "60" }
+        { "name": "CURRENCY_RATE_PROVIDER", "value": "frankfurter" }
       ]
     }
   ],

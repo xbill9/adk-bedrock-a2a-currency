@@ -1,8 +1,15 @@
 # Implementation plan
 
+> **Superseded in part on 2026-07-30.** The topology was reversed: the Google
+> ADK agent is now the master on Cloud Run and the AgentCore runtime is an A2A
+> worker (`app/CurrencyWorker/`). Phase 4 below describes the previous
+> AWS-master arrangement and is retained as a record of what was built and
+> measured, not as current instructions. See `README.md` and
+> `docs/ARCHITECTURE.md` for the present design.
+
 The repository originally ran this benchmark with a Microsoft Foundry–hosted
-coordinator (phases 1–5 completed and measured on 2026-07-26/27). It has since
-been ported to an AWS-native coordinator: Strands Agents on an Amazon Bedrock
+coordinator (phases 1–5 completed and measured on 2026-07-26/27). It was then
+ported to an AWS-native coordinator: Strands Agents on an Amazon Bedrock
 model, hosted on Bedrock AgentCore Runtime. Phases 1–3 carry over unchanged
 because the domain core is framework-independent; phase 4 is the AWS
 replacement work.

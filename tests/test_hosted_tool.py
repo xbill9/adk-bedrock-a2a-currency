@@ -31,23 +31,23 @@ async def test_hosted_tool_returns_structured_validation_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_hosted_master_fails_closed_when_gcp_adk_is_required(
+async def test_hosted_master_fails_closed_when_agentcore_is_required(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("CURRENCY_A2A_ENDPOINT", raising=False)
-    monkeypatch.setenv("CURRENCY_REQUIRE_GCP_ADK", "1")
+    monkeypatch.setenv("CURRENCY_REQUIRE_AWS_AGENTCORE", "1")
 
     payload = json.loads(await run_currency_benchmark("100", "USD", ["CAD"], "a2a_only"))
 
-    assert payload["error"] == "gcp_adk_not_configured"
+    assert payload["error"] == "agentcore_not_configured"
 
 
 @pytest.mark.asyncio
-async def test_mcp_baseline_does_not_require_gcp_adk(
+async def test_mcp_baseline_does_not_require_agentcore(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("CURRENCY_A2A_ENDPOINT", raising=False)
-    monkeypatch.setenv("CURRENCY_REQUIRE_GCP_ADK", "true")
+    monkeypatch.setenv("CURRENCY_REQUIRE_AWS_AGENTCORE", "true")
 
     payload = json.loads(await run_currency_benchmark("100", "USD", ["CAD"], "mcp_only"))
 
