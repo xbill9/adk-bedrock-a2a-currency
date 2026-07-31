@@ -43,36 +43,34 @@ fi
 gcloud secrets add-iam-policy-binding "$GEMINI_SECRET" --project "$GCP_PROJECT" \
   --member="serviceAccount:${SA_EMAIL}" --role=roles/secretmanager.secretAccessor >/dev/null
 
-echo "=== 2/4 AWS IAM: Google OIDC provider + assumable role ==="
+echo "=== 2/4 AWS IAM: assumable role for the Google identity ==="
 AWS_ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
-PROVIDER_ARN="arn:aws:iam::${AWS_ACCOUNT}:oidc-provider/accounts.google.com"
 
-if ! aws iam get-open-id-connect-provider --open-id-connect-provider-arn "$PROVIDER_ARN" >/dev/null 2>&1; then
-  # Google is a Google-operated IdP with a well-known root; AWS maintains the
-  # trust for accounts.google.com, so no thumbprint is required.
-  aws iam create-open-id-connect-provider \
-    --url "https://accounts.google.com" \
-    --client-id-list "$AUDIENCE" >/dev/null
-  echo "Created OIDC provider $PROVIDER_ARN"
-else
-  # The audience is the OIDC client ID; add it if this is a new audience.
-  aws iam add-client-id-to-open-id-connect-provider \
-    --open-id-connect-provider-arn "$PROVIDER_ARN" \
-    --client-id "$AUDIENCE" 2>/dev/null || true
-  echo "Reusing OIDC provider $PROVIDER_ARN"
-fi
-
+# No IAM OIDC identity provider is created: AWS federates with
+# accounts.google.com natively, so the principal is the bare domain.
+#
+# The condition keys do NOT map to the claims their names suggest, which is the
+# single easiest thing to get wrong here:
+#
+#   accounts.google.com:oaud  ->  the token's `aud`  (our audience string)
+#   accounts.google.com:aud   ->  the token's `azp`  (the SA's numeric client id)
+#   accounts.google.com:sub   ->  the token's `sub`  (the SA's numeric unique id)
+#
+# Putting the audience string in `:aud` is checked against `azp`, a numeric
+# value, so it can never match and STS returns "Incorrect token audience".
+# Pinning oaud + sub gives the full property we want: the right audience AND
+# the exact caller identity.
 TRUST_POLICY="$(cat <<JSON
 {
   "Version": "2012-10-17",
   "Statement": [
     {
       "Effect": "Allow",
-      "Principal": { "Federated": "${PROVIDER_ARN}" },
+      "Principal": { "Federated": "accounts.google.com" },
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
-          "accounts.google.com:aud": "${AUDIENCE}",
+          "accounts.google.com:oaud": "${AUDIENCE}",
           "accounts.google.com:sub": "${SA_SUBJECT}"
         }
       }
@@ -114,11 +112,22 @@ MSG
 fi
 echo "AgentCore A2A endpoint: $AGENTCORE_A2A_ENDPOINT"
 
-# Scope invocation to the deployed runtime. Derive the ARN from the endpoint's
-# runtime id so the policy does not grant blanket InvokeAgentRuntime.
-RUNTIME_ID="${AGENTCORE_A2A_ENDPOINT##*/runtimes/}"
-RUNTIME_ID="${RUNTIME_ID%%\?*}"
-RUNTIME_ID="${RUNTIME_ID%%/*}"
+# Scope invocation to the deployed runtime. `agentcore status` reports the URL
+# with a percent-encoded ARN in the path (.../runtimes/arn%3A...%2F<id>/invocations),
+# so decode before extracting rather than splitting on the raw string.
+RUNTIME_ID="$(python3 - "$AGENTCORE_A2A_ENDPOINT" <<'PY'
+import sys, urllib.parse
+url = urllib.parse.unquote(sys.argv[1]).split("?")[0]
+tail = url.split("/runtimes/", 1)[-1]
+tail = tail.split("/invocations")[0]
+# Handles both a bare runtime id and a full runtime ARN in the path.
+print(tail.rsplit("runtime/", 1)[-1].split("/")[0])
+PY
+)"
+if [[ -z "$RUNTIME_ID" ]]; then
+  echo "Could not derive a runtime id from AGENTCORE_A2A_ENDPOINT" >&2
+  exit 2
+fi
 aws iam put-role-policy --role-name "$AWS_ROLE_NAME" \
   --policy-name invoke-currency-worker \
   --policy-document "$(cat <<JSON

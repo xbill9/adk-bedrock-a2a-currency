@@ -180,21 +180,31 @@ Earlier baseline: the same benchmark ran hosted on Microsoft Foundry on
 2026-07-27 (all three modes completed; verified mode agreed exactly with
 relative_difference 0; mcp_only elapsed 0.71 s, verified 2.7 s).
 
-## Known unknowns for the first GCP → AWS run
+## Resolved on the first live deployment (2026-07-30)
 
-Verify these against live infrastructure before trusting the reversed loop:
+- **The A2A endpoint is the `/invocations` URL** that `agentcore status` prints,
+  with the runtime ARN percent-encoded into the path:
 
-- The exact A2A endpoint URL AgentCore fronts an `A2A`-protocol runtime with.
-  `deploy_live.sh` requires it as `AGENTCORE_A2A_ENDPOINT` rather than guessing.
-- Whether AgentCore's A2A proxy passes the SigV4 `Authorization` header through
-  to its own authorizer unchanged, and whether it rewrites the host or path in a
-  way that would invalidate the signature. This is the highest-risk unknown:
-  SigV4 signs the host header and path, so any proxy rewriting breaks it.
-- Whether the runtime ARN derived from the endpoint URL in `deploy_live.sh`
-  matches the ARN IAM actually authorizes against.
-- ~~Whether Google's `email` claim is present on metadata-server tokens.~~
-  Resolved: it is, but only with `format=full`, which
+  ```
+  https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/arn%3Aaws%3A...%2F<id>/invocations
+  ```
+
+  The agent card is served at `<that URL>/.well-known/agent-card.json`. Dropping
+  `/invocations` — the shape that looks more like a base URL — returns
+  `UnknownOperationException`, as does using a bare runtime id instead of the
+  encoded ARN.
+- **SigV4 survives the AgentCore proxy.** A signed `GET` of the agent card
+  returned 200, so the proxy does not rewrite the host or path in a way that
+  invalidates the signature. This was the highest-risk assumption in the switch
+  away from bearer tokens.
+- **The percent-encoded ARN broke naive runtime-id parsing.** `deploy_live.sh`
+  now URL-decodes the endpoint before extracting the id for the scoped invoke
+  policy; splitting the raw string yielded the whole encoded ARN.
+- **Google's `email` claim** is present, but only with `format=full`, which
   `coordinator/aws_identity.py` requests.
+- **The worker's agent card advertises its container bind address**
+  (`http://127.0.0.1:9000`), confirming the card-URL rewriting in
+  `coordinator/a2a_remote.py` is required on this side too, not just for ADK.
 
 ## Script configuration
 

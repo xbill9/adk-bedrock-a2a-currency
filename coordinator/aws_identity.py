@@ -22,6 +22,7 @@ is a plain HTTP POST here and needs no AWS SDK. ``botocore`` is used only for
 SigV4 signing, which is not worth reimplementing.
 """
 
+import logging
 import os
 from datetime import UTC, datetime
 from xml.etree import ElementTree
@@ -29,6 +30,8 @@ from xml.etree import ElementTree
 import httpx
 
 from coordinator.errors import AdapterError, FailureKind
+
+logger = logging.getLogger(__name__)
 
 METADATA_TOKEN_URL = (
     "http://metadata.google.internal/computeMetadata/v1/"
@@ -133,10 +136,20 @@ class WebIdentityCredentials:
                 response = await client.post(self._sts_endpoint, data=payload)
                 response.raise_for_status()
         except httpx.HTTPStatusError as exc:
+            # STS puts the actionable reason in the body -- "Incorrect token
+            # audience", "Not authorized to perform sts:AssumeRoleWithWebIdentity",
+            # and so on. Without it the status code alone cannot distinguish a
+            # trust-policy mismatch from a malformed token, so surface it. The
+            # body carries an error code and message, never the ID token.
+            detail = " ".join(exc.response.text.split())[:400]
+            # Log server-side as well: the AdapterError message travels back
+            # through the model, which paraphrases it and drops the detail.
+            logger.error("STS AssumeRoleWithWebIdentity failed: %s", detail)
             raise AdapterError(
                 FailureKind.AUTHENTICATION,
                 f"STS refused AssumeRoleWithWebIdentity ({exc.response.status_code}); "
-                "check the role trust policy's audience and sub conditions",
+                "check the role trust policy's audience and sub conditions. "
+                f"STS said: {detail}",
             ) from exc
         except (httpx.TransportError, OSError) as exc:
             raise AdapterError(

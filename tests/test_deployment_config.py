@@ -43,7 +43,12 @@ def test_deploy_pins_the_role_trust_policy_to_audience_and_subject() -> None:
     script = (ROOT / "infra/deploy_live.sh").read_text()
 
     assert "sts:AssumeRoleWithWebIdentity" in script
-    assert '"accounts.google.com:aud": "${AUDIENCE}"' in script
+    # The audience string must be pinned with `oaud`, not `aud`. AWS maps
+    # `accounts.google.com:aud` to the token's `azp` claim -- the service
+    # account's numeric client id -- so an audience string there is compared
+    # against a number and STS always answers "Incorrect token audience".
+    assert '"accounts.google.com:oaud": "${AUDIENCE}"' in script
+    assert '"accounts.google.com:aud": "${AUDIENCE}"' not in script
     assert '"accounts.google.com:sub": "${SA_SUBJECT}"' in script
     # uniqueId is the immutable numeric ID; email would be reusable.
     assert "--format='value(uniqueId)'" in script
@@ -110,6 +115,26 @@ def test_worker_avoids_the_incompatible_strands_a2a_extra() -> None:
     assert not any(dep.startswith("strands-agents[a2a]") for dep in dependencies)
     assert any(dep.startswith("strands-agents") for dep in dependencies)
     assert any(dep.startswith("a2a-sdk[http-server]") for dep in dependencies)
+
+
+def test_both_halves_declare_the_a2a_http_server_extra() -> None:
+    """Serving A2A needs sse_starlette, which neither google-adk[a2a] nor the
+    bare a2a-sdk pulls in. Omitting the extra passes every local test and then
+    kills the container at startup with ModuleNotFoundError -- it cost one
+    failed Cloud Run rollout on 2026-07-30."""
+    for manifest in ("adk_agent/pyproject.toml", "app/CurrencyWorker/pyproject.toml"):
+        dependencies = tomllib.loads((ROOT / manifest).read_text())["project"]["dependencies"]
+
+        assert any(
+            dep.startswith("a2a-sdk[http-server]") for dep in dependencies
+        ), manifest
+
+
+def test_adk_lockfile_includes_sse_starlette() -> None:
+    lock = tomllib.loads((ROOT / "adk_agent/uv.lock").read_text())
+    names = {pkg["name"] for pkg in lock["package"]}
+
+    assert "sse-starlette" in names
 
 
 def test_worker_lockfile_resolves_a2a_v1_wire_protocol() -> None:

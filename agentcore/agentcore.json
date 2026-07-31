@@ -17,6 +17,7 @@
       "networkMode": "PUBLIC",
       "protocol": "A2A",
       "authorizerType": "AWS_IAM",
+      "requestHeaderAllowlist": ["A2A-Version"],
       "envVars": [
         { "name": "BEDROCK_MODEL_ID", "value": "us.amazon.nova-micro-v1:0" },
         { "name": "BEDROCK_MAX_TOKENS", "value": "1024" },
