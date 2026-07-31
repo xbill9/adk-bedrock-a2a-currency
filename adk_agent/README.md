@@ -61,6 +61,7 @@ CURRENCY_COORDINATOR_ENDPOINT=http://127.0.0.1:8080 \
 ```
 
 `a2a_only` and `verified` additionally need a reachable worker: set
-`CURRENCY_A2A_ENDPOINT`, plus `CURRENCY_A2A_BEARER_TOKEN` if it is a deployed
-AgentCore runtime (the metadata server is unavailable off Cloud Run). See
+`CURRENCY_A2A_ENDPOINT`. Against a deployed AgentCore runtime you also need AWS
+credentials to sign with — off Cloud Run the metadata server is unavailable, so
+assume the role by hand and let the signer pick up the ambient credentials. See
 `docs/E2E_TESTING.md` tier 3.

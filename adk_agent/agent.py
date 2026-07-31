@@ -6,9 +6,10 @@ directly, and delegates independent verification to the Strands worker hosted
 on Amazon Bedrock AgentCore Runtime over A2A v1.0.
 
 Authentication to AgentCore is keyless. Cloud Run's metadata server mints a
-Google-issued OIDC token for the runtime service account, and AgentCore's
-CUSTOM_JWT authorizer validates it against Google's discovery document. The
-container holds no AWS credentials; see ``coordinator/gcp_identity.py``.
+Google-issued OIDC token for the runtime service account, which is exchanged via
+STS ``AssumeRoleWithWebIdentity`` for temporary AWS credentials that SigV4-sign
+each call. The container holds no long-lived AWS credentials; see
+``coordinator/aws_identity.py``.
 
 The ``coordinator/`` package in this directory is a copy of the repo-root
 package, synced by ``infra/sync_adk.sh`` before deploy so the Cloud Run source

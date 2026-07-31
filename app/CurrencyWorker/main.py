@@ -14,10 +14,11 @@ forced A2UI out of the ADK agent -- see the note in ``adk_agent/agent.py``.
 Strands is therefore used only as the agent loop, and the v1.0 server surface
 is assembled here so both ends speak the same protocol version.
 
-Inbound calls are authorized by AgentCore via the CUSTOM_JWT authorizer
-declared in ``agentcore/agentcore.json``: it validates the Google-issued OIDC
-token that the Cloud Run coordinator attaches, before the request ever reaches
-this process. No credential handling happens here.
+Inbound calls are authorized by AgentCore's default ``AWS_IAM`` authorizer
+before the request ever reaches this process: callers must SigV4-sign with a
+role permitted to invoke this runtime. The Cloud Run coordinator obtains those
+credentials by federating its Google identity through STS. No credential
+handling happens here.
 
 The ``coordinator/`` and ``mcp_server/`` packages in this directory are copies
 of the repo-root packages, synced by ``infra/sync_app.sh`` before deploy so the

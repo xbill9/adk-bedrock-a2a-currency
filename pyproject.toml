@@ -26,6 +26,10 @@ dev = [
   "pytest>=8.3",
   "pytest-asyncio>=0.25",
   "ruff>=0.9",
+  # coordinator/aws_identity.py signs with botocore. It is imported lazily so
+  # the domain core stays importable without it, but the tests exercise the
+  # real signer rather than a stand-in.
+  "botocore>=1.35",
 ]
 
 [tool.setuptools.packages.find]

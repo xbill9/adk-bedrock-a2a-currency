@@ -101,29 +101,39 @@ Runtime environment variables live in `agentcore/agentcore.json` under
 The worker no longer carries `CURRENCY_A2A_ENDPOINT`: it is the remote agent,
 not the caller.
 
-Inbound authorization lives beside it under `runtimes[0]`:
+Inbound authorization uses `authorizerType: "AWS_IAM"` — the default — so there
+is no authorizer configuration block. The trust decision lives in IAM instead,
+in two pieces created by `deploy_live.sh`:
 
-- `authorizerType: "CUSTOM_JWT"`
-- `authorizerConfiguration.customJwtAuthorizer.discoveryUrl` — Google's OIDC
-  discovery document
-- `.allowedAudience` — must equal the coordinator's `CURRENCY_A2A_AUDIENCE`
-- `.customClaims[0]` — pins the coordinator service account's `email`.
-  `deploy_live.sh` substitutes the real address for
-  `REPLACE_WITH_COORDINATOR_SERVICE_ACCOUNT_EMAIL`. Left unsubstituted, the
-  authorizer matches nothing and rejects every call — deliberately the safe
-  failure direction.
+- an OIDC identity provider for `https://accounts.google.com`, with the audience
+  registered as a client ID;
+- a role (`currencybench-coordinator` by default) whose trust policy allows
+  `sts:AssumeRoleWithWebIdentity` only when **both** `accounts.google.com:aud`
+  equals the audience and `accounts.google.com:sub` equals the coordinator
+  service account's numeric `uniqueId`. The numeric subject is used rather than
+  the email because it is immutable and never reused.
+
+The role also carries an inline policy granting
+`bedrock-agentcore:InvokeAgentRuntime` on the single deployed runtime ARN, not
+`*`. That ARN is derived from `AGENTCORE_A2A_ENDPOINT`, which is why the script
+attaches it on the second pass.
 
 ## Coordinator configuration (GCP)
 
 Set on the Cloud Run service by `deploy_live.sh`:
 
 - `CURRENCY_A2A_ENDPOINT` — the AgentCore runtime's A2A URL
+- `CURRENCY_AWS_ROLE_ARN` — the role to assume; unset disables signing
 - `CURRENCY_A2A_AUDIENCE` — audience requested from the metadata server
+- `AWS_REGION` — SigV4 signing region, matching the worker's region
 - `CURRENCY_REQUIRE_AWS_AGENTCORE=1` — fail closed for `a2a_only` and
   `verified` when the endpoint is missing
 - `CURRENCY_RATE_PROVIDER=frankfurter`, `CURRENCY_RATE_TRANSPORT=mcp-stdio`
 - `CURRENCY_TIMEOUT_SECONDS=60` (cross-cloud cold starts exceed the 10 s default)
 - `GENAI_MODEL=gemini-2.5-flash`, `GOOGLE_API_KEY` from Secret Manager
+
+A role ARN set without an audience or region raises rather than silently
+sending unsigned requests.
 
 ## Historical baseline: AWS master → GCP worker
 
@@ -176,21 +186,27 @@ Verify these against live infrastructure before trusting the reversed loop:
 
 - The exact A2A endpoint URL AgentCore fronts an `A2A`-protocol runtime with.
   `deploy_live.sh` requires it as `AGENTCORE_A2A_ENDPOINT` rather than guessing.
-- Whether AgentCore's proxy forwards the `Authorization` header to the
-  container or strips it after the authorizer runs. The worker does not read it
-  either way, but it affects what shows up in logs.
+- Whether AgentCore's A2A proxy passes the SigV4 `Authorization` header through
+  to its own authorizer unchanged, and whether it rewrites the host or path in a
+  way that would invalidate the signature. This is the highest-risk unknown:
+  SigV4 signs the host header and path, so any proxy rewriting breaks it.
+- Whether the runtime ARN derived from the endpoint URL in `deploy_live.sh`
+  matches the ARN IAM actually authorizes against.
 - ~~Whether Google's `email` claim is present on metadata-server tokens.~~
   Resolved: it is, but only with `format=full`, which
-  `coordinator/gcp_identity.py` requests. With `format=standard` the claim is
-  absent and the authorizer would reject every call.
+  `coordinator/aws_identity.py` requests.
 
 ## Script configuration
 
 `deploy_live.sh` intentionally contains no project ID or key path. Set
-`GCP_PROJECT`; optionally set `GCP_REGION`, `CURRENCY_COORDINATOR_SERVICE`,
-`CURRENCY_COORDINATOR_SA_NAME`, `CURRENCY_A2A_AUDIENCE`, `GEMINI_SECRET_NAME`,
-and `GEMINI_KEY_FILE`. `GEMINI_KEY_FILE` is used only when creating a missing
+`GCP_PROJECT`; optionally set `GCP_REGION`, `AWS_REGION`,
+`CURRENCY_COORDINATOR_SERVICE`, `CURRENCY_COORDINATOR_SA_NAME`,
+`CURRENCY_A2A_AUDIENCE`, `CURRENCY_AWS_ROLE_NAME`, `GEMINI_SECRET_NAME`, and
+`GEMINI_KEY_FILE`. `GEMINI_KEY_FILE` is used only when creating a missing
 Secret Manager secret.
+
+It needs AWS credentials with IAM write access (`CreateRole`,
+`CreateOpenIDConnectProvider`, `PutRolePolicy`) on the first run.
 
 Before deployment, verify the latest official instructions:
 

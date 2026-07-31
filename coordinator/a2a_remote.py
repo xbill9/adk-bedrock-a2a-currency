@@ -6,9 +6,9 @@ with no coordinator-framework dependency. The remote agent is prompted to
 answer with one JSON quote object per target currency; parsing is kept in pure
 functions so it can be tested without a network or credentials.
 
-AgentCore's A2A runtime is protected by a CUSTOM_JWT authorizer, so an optional
-``token_provider`` supplies a Google-issued OIDC bearer token per call. See
-``coordinator/gcp_identity.py``.
+AgentCore's A2A runtime uses the default ``AWS_IAM`` authorizer, so an optional
+``request_signer`` SigV4-signs every call with credentials federated from the
+coordinator's Google identity. See ``coordinator/aws_identity.py``.
 """
 
 import asyncio
@@ -112,25 +112,15 @@ class A2ARemoteCurrencyAgent:
         *,
         source: str = "agentcore-a2a",
         timeout_s: float = 120.0,
-        token_provider=None,
+        request_signer=None,
     ) -> None:
         self._endpoint = endpoint
         self._source = source
         self._timeout_s = timeout_s
-        self._token_provider = token_provider
-
-    async def _auth_headers(self) -> dict[str, str]:
-        """Mint the bearer header AgentCore's JWT authorizer expects, if any."""
-        if self._token_provider is None:
-            return {}
-        return {"Authorization": f"Bearer {await self._token_provider.token()}"}
+        self._request_signer = request_signer
 
     async def _send(self, prompt: str) -> str:
         """Resolve the agent card, send one text message, and gather reply text."""
-        # Mint credentials before touching the transport: an unauthenticated
-        # call would only be rejected at the far end anyway.
-        headers = await self._auth_headers()
-
         from a2a.client import A2ACardResolver, ClientConfig, create_client
         from a2a.helpers import get_message_text, get_text_parts, new_text_message
         from a2a.types import Role, SendMessageRequest
@@ -138,8 +128,10 @@ class A2ARemoteCurrencyAgent:
         # local_address pins the socket to IPv4; IPv6 to some hosts hangs in
         # some sandboxes (same workaround as FrankfurterRateProvider).
         transport = httpx.AsyncHTTPTransport(local_address="0.0.0.0")
+        # The signer is attached to the client, so it covers both the agent-card
+        # fetch and the JSON-RPC calls a2a-sdk builds internally.
         async with httpx.AsyncClient(
-            timeout=self._timeout_s, transport=transport, headers=headers
+            timeout=self._timeout_s, transport=transport, auth=self._request_signer
         ) as httpx_client:
             resolver = A2ACardResolver(httpx_client=httpx_client, base_url=self._endpoint)
             card = await resolver.get_agent_card()

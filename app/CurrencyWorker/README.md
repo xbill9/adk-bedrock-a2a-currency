@@ -34,11 +34,11 @@ as the agent loop, and the v1.0 server surface is assembled in `main.py`.
 AgentCore's A2A runtime proxies JSON-RPC to the container on **port 9000** and
 expects the agent card at `/.well-known/agent-card.json`.
 
-Inbound requests are authorized *before* they reach this process, by the
-`CUSTOM_JWT` authorizer in `agentcore/agentcore.json`: it validates a
-Google-issued OIDC token against Google's discovery document and matches the
-coordinator service account's `email` claim. No credential handling happens in
-this code.
+Inbound requests are authorized *before* they reach this process, by AgentCore's
+default `AWS_IAM` authorizer: callers must SigV4-sign with credentials for a
+role permitted to invoke this runtime. The coordinator gets those by federating
+its Google identity through STS; see `docs/ARCHITECTURE.md`. No credential
+handling happens in this code.
 
 ## Local development
 
@@ -58,6 +58,5 @@ currency-benchmark 100 USD EUR --mode a2a_only --a2a-endpoint http://127.0.0.1:9
 ## Deployment
 
 See `infra/README.md`. `agentcore invoke` is not useful against the deployed
-runtime: it speaks JSON-RPC under `"protocol": "A2A"`, and its authorizer
-accepts only Google-issued tokens carrying the coordinator's email claim. Drive
-the loop through the coordinator instead.
+runtime: it speaks JSON-RPC under `"protocol": "A2A"`. Drive the loop through
+the coordinator instead.

@@ -3,11 +3,16 @@
 # models. a2a-sdk 1.1.2 was validated live against google-adk 2.5.0 on
 # 2026-07-27.
 #
+# botocore is used only to SigV4-sign requests to the AgentCore worker. The
+# STS AssumeRoleWithWebIdentity exchange needs no SDK -- that API takes no
+# credentials -- so boto3 itself is not required.
+#
 # Deliberately not listed here:
 # - strands-agents / aws-opentelemetry-distro: worker-side only, pinned in
 #   app/CurrencyWorker/pyproject.toml.
-# - boto3 / bedrock-agentcore: no longer used. The coordinator reaches AgentCore
-#   over A2A with a Google OIDC bearer token, not the AWS SDK.
+# - bedrock-agentcore: the coordinator reaches the worker over A2A, not through
+#   the AgentCore runtime SDK.
 a2a-sdk==1.1.2
+botocore==1.40.60
 httpx==0.28.1
 pydantic==2.13.4

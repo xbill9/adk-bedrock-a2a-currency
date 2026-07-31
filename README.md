@@ -29,7 +29,7 @@ Google ADK on Gemini (Python)
        |
        +-- MCP (stdio) --> exchange-rate server
        |
-       +-- A2A v1.0 + Google OIDC --> Bedrock AgentCore worker (Strands, Nova)
+       +-- A2A v1.0 + SigV4 (WIF) --> Bedrock AgentCore worker (Strands, Nova)
        |
        +-- OpenTelemetry traces + evaluation results
 ```
@@ -53,7 +53,7 @@ The first publishable version has only:
 - one Google ADK coordinator on Cloud Run;
 - one Strands Agents worker on AgentCore Runtime;
 - one MCP exchange-rate server;
-- keyless Google OIDC authentication into AgentCore's CUSTOM_JWT authorizer;
+- keyless GCP→AWS workload identity federation into AgentCore's IAM authorizer;
 - A2A agent-card discovery;
 - structured conversion results;
 - hosted trace correlation, with benchmark trace-ID export still pending; and
@@ -131,24 +131,24 @@ are not live financial quotes.
 
 Both halves deploy from one script, in dependency order — the worker must exist
 before the coordinator can be pointed at it, and the coordinator's service
-account must exist before the worker's authorizer can pin it:
+account must exist before the IAM trust policy can pin its subject ID:
 
 ```bash
 export GCP_PROJECT=my-project
-./infra/deploy_live.sh          # creates the SA, deploys the AgentCore worker
+./infra/deploy_live.sh          # SA, IAM OIDC provider + role, AgentCore worker
 export AGENTCORE_A2A_ENDPOINT="https://...."   # from the `agentcore status` output
-./infra/deploy_live.sh          # deploys the Cloud Run coordinator
+./infra/deploy_live.sh          # scopes the invoke policy, deploys the coordinator
 ```
 
 The AWS half uses the npm `@aws/agentcore` CLI (CDK-based; the pip
 starter-toolkit flow is deprecated). The worker entrypoint is
 `app/CurrencyWorker/main.py`. See `infra/README.md` for one-time setup.
 
-Authentication is keyless in both directions of setup: the coordinator mints a
-Google OIDC token from the Cloud Run metadata server and AgentCore's
-`CUSTOM_JWT` authorizer validates it. **Audience alone is not authorization** —
-the authorizer also pins the coordinator service account's `email` claim, which
-`deploy_live.sh` substitutes. See `docs/ARCHITECTURE.md`.
+Authentication is keyless: the coordinator mints a Google OIDC token from the
+Cloud Run metadata server, exchanges it for temporary AWS credentials via STS
+`AssumeRoleWithWebIdentity`, and SigV4-signs its requests. **Audience alone is
+not authorization** — the role's trust policy also pins the service account's
+immutable numeric subject ID. See `docs/ARCHITECTURE.md`.
 
 Coordinator configuration sets `CURRENCY_REQUIRE_AWS_AGENTCORE=1`. Therefore
 `a2a_only` and `verified` fail with `agentcore_not_configured` if
@@ -185,18 +185,22 @@ directly. A test asserts the lockfile keeps `a2a-sdk` on 1.x.
 - Reversed on 2026-07-30 (this revision): the ADK agent became the master
   (`adk_agent/agent.py`, Gemini) hosting the benchmark tool, and the AgentCore
   runtime became an A2A worker (`app/CurrencyWorker/main.py`, Nova Micro,
-  `"protocol": "A2A"`). Cross-cloud auth moved from AWS SigV4 to keyless Google
-  OIDC against a `CUSTOM_JWT` authorizer. **Not yet deployed or measured in this
-  direction** — the code and config are complete and the local suite is green,
-  but no live GCP → AWS run has been recorded.
+  `"protocol": "A2A"`). Cross-cloud auth became keyless GCP→AWS workload
+  identity federation: a Google OIDC token is exchanged via STS
+  `AssumeRoleWithWebIdentity` for temporary credentials that SigV4-sign each
+  call. (A first pass used a `CUSTOM_JWT` authorizer with a bearer token; it was
+  replaced because an IAM trust policy is a stronger place for the trust
+  decision than a claim matcher in config.) **Not yet deployed or measured in
+  this direction** — the code and config are complete and the local suite is
+  green, but no live GCP → AWS run has been recorded.
 - Historical baseline, AWS master → GCP worker (2026-07-28/29): all three modes
   completed hosted; verified mode agreed with `relative_difference: "0"`. See
   `infra/README.md`.
 - Historical baseline, Azure-era evidence (2026-07-26/27): live Frankfurter
   rates over MCP stdio, the cross-cloud A2A v1.0 call, and a full 38-case live
   evaluation (`evaluations/results/live-2026-07-27.jsonl`).
-- Not yet measured: the GCP → AWS path end to end, the Google OIDC handshake
-  against a live authorizer, token usage, cloud cost, repeated warm/cold hosted
+- Not yet measured: the GCP → AWS path end to end, the STS federation handshake
+  against live IAM, token usage, cloud cost, repeated warm/cold hosted
   distributions, or benchmark trace-ID export.
 
 ## Full benchmark definition of done
@@ -218,9 +222,11 @@ directly. A test asserts the lockfile keeps `a2a-sdk` on 1.x.
 - [Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python)
 - [Strands Agents quickstart](https://strandsagents.com/docs/user-guide/quickstart/python/)
 - [A2A protocol support in AgentCore Runtime](https://aws.amazon.com/blogs/machine-learning/introducing-agent-to-agent-protocol-support-in-amazon-bedrock-agentcore-runtime/)
-- [AgentCore Runtime inbound auth (CUSTOM_JWT)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-inbound-auth.html)
+- [AgentCore Runtime inbound auth](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-inbound-auth.html)
 - [agentcore.json schema](https://schema.agentcore.aws.dev/v1/agentcore.json)
 - [Fetching Google OIDC ID tokens from the metadata server](https://cloud.google.com/run/docs/securing/service-identity)
+- [STS AssumeRoleWithWebIdentity](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRoleWithWebIdentity.html)
+- [IAM OIDC identity providers](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html)
 
 These services and SDKs move quickly. Pin working versions once the first
 end-to-end deployment succeeds, and record them in the article.

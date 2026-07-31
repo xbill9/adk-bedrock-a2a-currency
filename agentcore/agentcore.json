@@ -16,25 +16,7 @@
       "runtimeVersion": "PYTHON_3_14",
       "networkMode": "PUBLIC",
       "protocol": "A2A",
-      "authorizerType": "CUSTOM_JWT",
-      "authorizerConfiguration": {
-        "customJwtAuthorizer": {
-          "discoveryUrl": "https://accounts.google.com/.well-known/openid-configuration",
-          "allowedAudience": ["currencybench-agentcore-worker"],
-          "customClaims": [
-            {
-              "inboundTokenClaimName": "email",
-              "inboundTokenClaimValueType": "STRING",
-              "authorizingClaimMatchValue": {
-                "claimMatchOperator": "EQUALS",
-                "claimMatchValue": {
-                  "matchValueString": "REPLACE_WITH_COORDINATOR_SERVICE_ACCOUNT_EMAIL"
-                }
-              }
-            }
-          ]
-        }
-      },
+      "authorizerType": "AWS_IAM",
       "envVars": [
         { "name": "BEDROCK_MODEL_ID", "value": "us.amazon.nova-micro-v1:0" },
         { "name": "BEDROCK_MAX_TOKENS", "value": "1024" },

@@ -58,13 +58,12 @@ async def _run(args: argparse.Namespace) -> int:
     )
     if args.a2a_endpoint:
         from coordinator.a2a_remote import A2ARemoteCurrencyAgent
-        from coordinator.gcp_identity import token_provider_from_env
+        from coordinator.aws_identity import signer_from_env
 
-        # Off Cloud Run the metadata server is unreachable, so a hand-minted
-        # CURRENCY_A2A_BEARER_TOKEN is the usual way to reach a protected
-        # AgentCore worker from a laptop. None means an unauthenticated agent.
+        # Set CURRENCY_AWS_ROLE_ARN to sign requests to a deployed AgentCore
+        # worker; unset means an unauthenticated agent (e.g. a local worker).
         remote_agent = A2ARemoteCurrencyAgent(
-            args.a2a_endpoint, token_provider=token_provider_from_env()
+            args.a2a_endpoint, request_signer=signer_from_env()
         )
     else:
         remote_agent = DeterministicCurrencyAdapter(provider, source="local-a2a")

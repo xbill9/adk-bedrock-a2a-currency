@@ -84,24 +84,46 @@ Requires the AgentCore worker deployment (`infra/deploy_live.sh` through step
 2). The local CLI stands in for the Cloud Run master and calls the AWS worker
 directly.
 
-Because the metadata server is unavailable off Cloud Run, mint a token by hand.
-The audience must match `allowedAudience` in `agentcore/agentcore.json`, and the
-authorizer pins the *coordinator service account's* email — so impersonate that
-account rather than using your own user identity:
+The metadata server is unavailable off Cloud Run, so the coordinator cannot mint
+its own token here. Assume the role directly with the AWS CLI and export the
+resulting temporary credentials instead — the role trust policy pins the
+*coordinator service account's* subject, so impersonate that account rather than
+using your own identity:
 
 ```bash
-export CURRENCY_A2A_BEARER_TOKEN=$(gcloud auth print-identity-token \
+ID_TOKEN=$(gcloud auth print-identity-token \
   --impersonate-service-account="currency-coordinator@${GCP_PROJECT}.iam.gserviceaccount.com" \
   --audiences=currencybench-agentcore-worker)
 
+eval "$(aws sts assume-role-with-web-identity \
+  --role-arn "$CURRENCY_AWS_ROLE_ARN" \
+  --role-session-name local-test \
+  --web-identity-token "$ID_TOKEN" \
+  --query 'Credentials.[
+      `export AWS_ACCESS_KEY_ID=`,AccessKeyId,
+      `export AWS_SECRET_ACCESS_KEY=`,SecretAccessKey,
+      `export AWS_SESSION_TOKEN=`,SessionToken]' \
+  --output text | tr '\t' '\n' | paste -d'' - -)"
+```
+
+Note this exports *static* credentials into your shell, which the deployed
+coordinator never does — it re-federates per credential lifetime. Unset them
+when finished.
+
+Leave `CURRENCY_AWS_ROLE_ARN` unset here: without it the signer falls back to
+the ambient AWS credentials you just exported, which is exactly what you want
+off Cloud Run. `AWS_REGION` must still be set, since SigV4 signs over it.
+
+```bash
+unset CURRENCY_AWS_ROLE_ARN
+export AWS_REGION=us-east-1
 CURRENCY_RATE_PROVIDER=frankfurter currency-benchmark 250 GBP USD JPY \
   --mode verified --transport mcp-stdio \
   --a2a-endpoint "$AGENTCORE_A2A_ENDPOINT" --timeout-seconds 60
 ```
 
-`CURRENCY_A2A_BEARER_TOKEN` bypasses the metadata server entirely; without it
-the run fails with an `authentication` error rather than falling back to a
-fixture.
+Without valid credentials the run fails with an `authentication` error rather
+than falling back to a fixture.
 
 Keep `--timeout-seconds 60`: a cold start plus multi-target generation exceeds
 the 10 s default, and cold starts can also produce partial replies (typed as

@@ -7,6 +7,8 @@ dependencies = [
     "google-adk[a2a]==2.5.0",
     # The benchmark tool is an A2A *client* of the AgentCore worker.
     "a2a-sdk>=1.1,<2",
+    # SigV4 signing only; the STS web-identity exchange needs no AWS SDK.
+    "botocore>=1.35",
     "python-dotenv>=1.1.0",
     "uvicorn>=0.35.0",
     "httpx>=0.28.1",

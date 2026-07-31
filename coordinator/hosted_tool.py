@@ -4,6 +4,9 @@ Defaults to deterministic fixture adapters so local tests run without credential
 Hosted deployments set ``CURRENCY_REQUIRE_AWS_AGENTCORE=1`` so a missing
 ``CURRENCY_A2A_ENDPOINT`` fails closed instead of silently replacing the AWS
 AgentCore worker with a fixture.
+
+Requests to a deployed worker are SigV4-signed with credentials federated from
+the coordinator's Google identity; see ``coordinator/aws_identity.py``.
 """
 
 import json
@@ -62,14 +65,14 @@ async def run_currency_benchmark(
     }
     if a2a_endpoint:
         from coordinator.a2a_remote import A2ARemoteCurrencyAgent
-        from coordinator.gcp_identity import token_provider_from_env
+        from coordinator.aws_identity import signer_from_env
 
-        # AgentCore's CUSTOM_JWT authorizer expects a Google-issued OIDC token;
-        # None here means an unauthenticated endpoint (local worker in tests).
+        # AgentCore's AWS_IAM authorizer expects SigV4; None here means an
+        # unauthenticated endpoint (a local worker in tests).
         remote_agent = A2ARemoteCurrencyAgent(
             a2a_endpoint,
             source="aws-agentcore-a2a-worker",
-            token_provider=token_provider_from_env(),
+            request_signer=signer_from_env(),
         )
     elif require_agentcore and benchmark_mode is not BenchmarkMode.MCP_ONLY:
         return json.dumps(

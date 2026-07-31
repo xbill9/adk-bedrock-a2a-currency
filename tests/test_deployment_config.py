@@ -6,9 +6,6 @@ import pytest
 
 ROOT = Path(__file__).parents[1]
 
-GOOGLE_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configuration"
-
-
 def _runtime() -> dict:
     config = json.loads((ROOT / "agentcore/agentcore.json").read_text())
     return config["runtimes"][0]
@@ -30,30 +27,34 @@ def test_agentcore_worker_serves_a2a_and_caps_bedrock_output() -> None:
     assert "CURRENCY_A2A_ENDPOINT" not in env
 
 
-def test_agentcore_worker_requires_google_issued_tokens() -> None:
+def test_agentcore_worker_authorizes_with_iam() -> None:
+    """IAM evaluates the caller, so there is no in-config claim matcher to get
+    wrong -- the trust decision lives in the role's trust policy."""
     runtime = _runtime()
 
-    assert runtime["authorizerType"] == "CUSTOM_JWT"
-    authorizer = runtime["authorizerConfiguration"]["customJwtAuthorizer"]
-    assert authorizer["discoveryUrl"] == GOOGLE_DISCOVERY_URL
-    assert authorizer["allowedAudience"]
+    assert runtime["authorizerType"] == "AWS_IAM"
+    assert "authorizerConfiguration" not in runtime
 
 
-def test_agentcore_authorizer_pins_a_caller_identity_claim() -> None:
-    """Audience alone only proves 'some Google principal' minted the token.
+def test_deploy_pins_the_role_trust_policy_to_audience_and_subject() -> None:
+    """Audience alone only proves 'some Google principal' minted the token: any
+    service account can request a token for an arbitrary audience. The trust
+    policy must also pin the coordinator's immutable numeric subject."""
+    script = (ROOT / "infra/deploy_live.sh").read_text()
 
-    Any Google service account can request an ID token for an arbitrary
-    audience string, so authorization depends on matching the coordinator's
-    own identity claim.
-    """
-    authorizer = _runtime()["authorizerConfiguration"]["customJwtAuthorizer"]
-    claims = authorizer["customClaims"]
+    assert "sts:AssumeRoleWithWebIdentity" in script
+    assert '"accounts.google.com:aud": "${AUDIENCE}"' in script
+    assert '"accounts.google.com:sub": "${SA_SUBJECT}"' in script
+    # uniqueId is the immutable numeric ID; email would be reusable.
+    assert "--format='value(uniqueId)'" in script
 
-    assert len(claims) == 1
-    claim = claims[0]
-    assert claim["inboundTokenClaimName"] == "email"
-    assert claim["authorizingClaimMatchValue"]["claimMatchOperator"] == "EQUALS"
-    assert claim["authorizingClaimMatchValue"]["claimMatchValue"]["matchValueString"]
+
+def test_deploy_scopes_invoke_permission_to_one_runtime() -> None:
+    script = (ROOT / "infra/deploy_live.sh").read_text()
+
+    assert "bedrock-agentcore:InvokeAgentRuntime" in script
+    assert '"Resource": [' in script
+    assert '"Resource": "*"' not in script
 
 
 def _assert_bundle_matches(bundle_root: str, package_file: str) -> None:
