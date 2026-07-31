@@ -8,10 +8,10 @@ system.
 | Tier | What runs | Needs |
 |---|---|---|
 | 0 | Deterministic tests, fixture adapters | nothing |
-| 1 | Live ADK agent + live rates, local | Gemini key |
+| 1 | Live ADK master + live rates, local | Gemini key |
 | 2 | Full 38-case matrix vs live local stack | Gemini key |
-| 3 | Local coordinator → Cloud Run agent | deployed `currency-adk-a2a` |
-| 4 | AgentCore-hosted coordinator → Cloud Run agent | full deployment + AWS credentials |
+| 3 | Local coordinator → AgentCore worker | deployed worker + minted token |
+| 4 | Cloud Run master → AgentCore worker | full deployment |
 
 ## Prerequisites
 
@@ -20,8 +20,10 @@ system.
 - `uv` (for the ADK agent's own venv).
 - A Gemini API key exported as `GOOGLE_API_KEY` (tiers 1–2). Keep
   `GOOGLE_GENAI_USE_VERTEXAI` unset.
-- AWS credentials with `bedrock-agentcore:InvokeAgentRuntime` on the deployed
-  runtime, e.g. via `aws configure` or SSO (tier 4).
+- AWS credentials only to *deploy* the worker (tiers 3–4). Calling it needs no
+  AWS identity: the authorizer accepts a Google-issued OIDC token instead.
+- `gcloud` with permission to impersonate the coordinator service account, to
+  mint that token by hand for tier 3.
 
 ## Tier 0 — deterministic core (no credentials)
 

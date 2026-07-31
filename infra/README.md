@@ -179,9 +179,10 @@ Verify these against live infrastructure before trusting the reversed loop:
 - Whether AgentCore's proxy forwards the `Authorization` header to the
   container or strips it after the authorizer runs. The worker does not read it
   either way, but it affects what shows up in logs.
-- Whether Google's `email` claim is present on metadata-server tokens for the
-  chosen `audience` format. If not, pin `sub` (the service account's numeric ID)
-  instead.
+- ~~Whether Google's `email` claim is present on metadata-server tokens.~~
+  Resolved: it is, but only with `format=full`, which
+  `coordinator/gcp_identity.py` requests. With `format=standard` the claim is
+  absent and the authorizer would reject every call.
 
 ## Script configuration
 

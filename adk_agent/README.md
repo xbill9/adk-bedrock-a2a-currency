@@ -1,46 +1,66 @@
-# Google ADK agent
+# Google ADK master agent
 
-Runnable benchmark agent derived from `xbill9/currency-agent@aeef3c4`, with the
-A2UI extension removed. See `agent.py` for why: `a2ui-agent-sdk` (through 0.4.0)
-pins `a2a-sdk<0.4`, which serves the A2A v0.3.0 wire methods (`message/send`),
-while A2A v1.0 clients (`a2a-sdk>=1.0`, including the Bedrock coordinator's
-adapter) call the v1.0 methods (`SendMessage`). The two cannot interoperate;
-upgrading to `google-adk==2.5.0` (the first release allowing `a2a-sdk<2`) and
-dropping A2UI lets this agent serve A2A v1.0.
+The coordinator half of the benchmark: a Gemini `LlmAgent` that owns the three
+benchmark modes, calls the MCP exchange-rate tool directly, and delegates
+independent verification to the Strands worker on Bedrock AgentCore over A2A
+v1.0. It is served over A2A itself (`to_a2a`) so the evaluation runner can drive
+it the same way any A2A client would.
+
+Derived from `xbill9/currency-agent@aeef3c4`, with the A2UI extension removed.
+See the "A2A version skew" findings below for why.
+
+`coordinator/` and `mcp_server/` in this directory are copies of the repo-root
+packages, synced by `infra/sync_adk.sh`. They are build artifacts and are
+gitignored — edit the root packages.
 
 ## Recorded interoperability findings
 
-- `MethodNotFoundError` is the observable symptom of the v0.3.0/v1.0 skew:
-  a2a-sdk 1.x clients call `SendMessage`; 0.3.x servers only route
-  `message/send`. There is no version negotiation from the agent card. This
-  affects any v1.0 client the same way, regardless of hosting cloud.
+These are the reason the code looks the way it does. All still apply.
+
+- **A2A v0.3 vs v1.0 is a hard split with no negotiation.** `MethodNotFoundError`
+  is the observable symptom: a2a-sdk 1.x clients call `SendMessage`; 0.3.x
+  servers only route `message/send`. The agent card offers no version
+  negotiation. This affects any v1.0 client the same way, regardless of hosting
+  cloud.
+  - It forced A2UI out of this agent: `a2ui-agent-sdk` (through 0.4.0) pins
+    `a2a-sdk<0.4`. Upgrading to `google-adk==2.5.0` (the first release allowing
+    `a2a-sdk<2`) and dropping A2UI let it speak v1.0.
+  - The same split later blocked `strands-agents[a2a]` on the worker side, which
+    still pins `a2a-sdk<0.4`. The worker therefore builds its server from
+    `a2a-sdk` directly; see `app/CurrencyWorker/main.py`.
 - The v1.0 agent card moved `url`/`protocolVersion` into `supportedInterfaces`.
-- ADK's `to_a2a()` puts the server's *bind* address (e.g.
-  `http://127.0.0.1:8080`) in `supportedInterfaces[].url`. a2a-sdk 1.x
-  clients route transport by card URL and therefore fail cross-cloud unless
-  they rewrite the card URLs to the known public endpoint (the Microsoft
-  Agent Framework client ignored the card URL, masking this).
-- ADK auto-advertises MCP tools (`get_exchange_rate`) as A2A skills on the card.
-- With A2UI removed, replies arrive as plain text parts, which
-  `coordinator/a2a_remote.py` parses as one JSON object per target currency.
+- **Agent cards advertise bind addresses, not reachable ones.** ADK's `to_a2a()`
+  puts the server's bind address (e.g. `http://127.0.0.1:8080`) in
+  `supportedInterfaces[].url`, and a2a-sdk 1.x clients route transport by card
+  URL — so they fail cross-cloud unless they rewrite the card URLs to the known
+  public endpoint. `coordinator/a2a_remote.py` does exactly that. (The Microsoft
+  Agent Framework client ignored the card URL, which masked this.)
+- Replies arrive as plain text parts, which `coordinator/a2a_remote.py` parses
+  as one JSON object per target currency.
 
-## Run
+## Run locally
 
-The agent needs `GOOGLE_API_KEY` (or `GEMINI_API_KEY`) in the environment or a
-`.env` file, and a running MCP exchange-rate server (default
-`http://127.0.0.1:8081/mcp`; override with `MCP_SERVER_URL`). The
-currency-agent repository's FastMCP server provides live Frankfurter rates:
+Needs `GOOGLE_API_KEY` (or `GEMINI_API_KEY`) in the environment or a `.env`
+file. The MCP rate server is no longer a separate HTTP service — the benchmark
+tool spawns `python -m mcp_server.server` over stdio per request.
 
 ```bash
-cd ~/currency-agent && MCP_PORT=8081 uv run mcp-server/server.py &
+./infra/sync_adk.sh          # from the repo root
 cd adk_agent && uv sync
-MCP_SERVER_URL=http://127.0.0.1:8081/mcp uv run uvicorn agent:a2a_app --host 127.0.0.1 --port 10001
+CURRENCY_RATE_TRANSPORT=mcp-stdio uv run uvicorn agent:a2a_app \
+  --host 127.0.0.1 --port 8080
 ```
 
 Verify with:
 
 ```bash
-curl http://127.0.0.1:10001/health
-curl http://127.0.0.1:10001/.well-known/agent-card.json
-currency-benchmark 100 USD EUR --mode a2a_only --a2a-endpoint http://127.0.0.1:10001
+curl http://127.0.0.1:8080/health
+curl http://127.0.0.1:8080/.well-known/agent-card.json
+CURRENCY_COORDINATOR_ENDPOINT=http://127.0.0.1:8080 \
+  python3 -m evaluations.invoke_hosted "Convert 100 USD to EUR in mcp_only mode."
 ```
+
+`a2a_only` and `verified` additionally need a reachable worker: set
+`CURRENCY_A2A_ENDPOINT`, plus `CURRENCY_A2A_BEARER_TOKEN` if it is a deployed
+AgentCore runtime (the metadata server is unavailable off Cloud Run). See
+`docs/E2E_TESTING.md` tier 3.
