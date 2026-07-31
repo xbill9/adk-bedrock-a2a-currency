@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schema.agentcore.aws.dev/v1/agentcore.json",
+  "name": "currencybench",
+  "version": 1,
+  "managedBy": "CDK",
+  "tags": {
+    "agentcore:created-by": "agentcore-cli",
+    "agentcore:project-name": "currencybench"
+  },
+  "runtimes": [
+    {
+      "name": "CurrencyCoordinator",
+      "build": "CodeZip",
+      "entrypoint": "main.py",
+      "codeLocation": "app/CurrencyCoordinator/",
+      "runtimeVersion": "PYTHON_3_14",
+      "networkMode": "PUBLIC",
+      "protocol": "HTTP",
+      "envVars": [
+        { "name": "BEDROCK_MODEL_ID", "value": "us.amazon.nova-micro-v1:0" },
+        { "name": "BEDROCK_MAX_TOKENS", "value": "1024" },
+        { "name": "CURRENCY_A2A_ENDPOINT", "value": "https://currency-adk-a2a-wgcq55zbfq-uc.a.run.app" },
+        { "name": "CURRENCY_REQUIRE_GCP_ADK", "value": "1" },
+        { "name": "CURRENCY_RATE_PROVIDER", "value": "frankfurter" },
+        { "name": "CURRENCY_RATE_TRANSPORT", "value": "mcp-stdio" },
+        { "name": "CURRENCY_TIMEOUT_SECONDS", "value": "60" }
+      ]
+    }
+  ],
+  "memories": [],
+  "knowledgeBases": [],
+  "credentials": [],
+  "evaluators": [],
+  "onlineEvalConfigs": [],
+  "agentCoreGateways": [],
+  "policyEngines": [],
+  "configBundles": [],
+  "abTests": [],
+  "harnesses": [],
+  "datasets": [],
+  "payments": []
+}

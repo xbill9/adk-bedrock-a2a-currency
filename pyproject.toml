@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bedrock-adk-a2a-currency"
+version = "0.2.0"
+description = "Cross-cloud Amazon Bedrock AgentCore, Strands Agents, MCP, and Google ADK A2A interoperability lab"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.10",
+  "httpx>=0.28",
+]
+
+[project.scripts]
+currency-benchmark = "coordinator.cli:main"
+currency-evaluate = "evaluations.runner:main"
+currency-mcp-server = "mcp_server.server:main"
+
+[project.optional-dependencies]
+# Add and pin AWS/Google/A2A/MCP packages after validating the current official
+# quickstarts. Keeping them out of the initial skeleton avoids encoding an API
+# surface that may already have moved.
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.25",
+  "ruff>=0.9",
+]
+
+[tool.setuptools.packages.find]
+include = ["coordinator*", "evaluations*", "mcp_server*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# app/ holds the AgentCore bundle with synced copies of coordinator/ and
+# mcp_server/; lint the originals, not the copies.
+extend-exclude = ["app"]

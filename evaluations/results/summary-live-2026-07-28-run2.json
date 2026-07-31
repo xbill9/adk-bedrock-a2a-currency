@@ -1,0 +1,29 @@
+{
+  "modes": {
+    "a2a_only": {
+      "agreement_rate": null,
+      "median_latency_ms": 2092.277,
+      "p95_latency_ms": 6104.76,
+      "records": 38,
+      "records_with_failures": 3,
+      "success_rate": 1.0
+    },
+    "mcp_only": {
+      "agreement_rate": null,
+      "median_latency_ms": 286.268,
+      "p95_latency_ms": 539.582,
+      "records": 38,
+      "records_with_failures": 3,
+      "success_rate": 1.0
+    },
+    "verified": {
+      "agreement_rate": 0.9677,
+      "median_latency_ms": 1870.806,
+      "p95_latency_ms": 4334.641,
+      "records": 38,
+      "records_with_failures": 5,
+      "success_rate": 1.0
+    }
+  },
+  "total_records": 114
+}

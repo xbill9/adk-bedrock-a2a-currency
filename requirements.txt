@@ -1,0 +1,10 @@
+# Direct hosted-coordinator dependencies for the AgentCore deployment.
+# a2a-sdk 1.1.2 was validated live against google-adk 2.5.0 on 2026-07-27.
+# AWS pins are research-validated candidates (2026-07-28); re-pin after the
+# first verified end-to-end AgentCore deployment.
+bedrock-agentcore==1.18.1
+strands-agents==1.50.2
+a2a-sdk==1.1.2
+boto3>=1.40
+httpx==0.28.1
+pydantic==2.13.4

@@ -1,0 +1,30 @@
+.env
+.aws_creds
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.cache/
+agentcore/.cli/
+agentcore/.cache/
+
+dist/
+build/
+*.egg-info/
+evaluations/results/*.csv
+# AgentCore CLI local state (account-specific values, CDK staging)
+agentcore/.env.local
+agentcore/aws-targets.json
+agentcore/.cli/logs/
+cdk.out/
+# Build artifacts synced into the app bundle by infra/sync_app.sh
+app/CurrencyCoordinator/.venv/
+app/CurrencyCoordinator/coordinator/
+app/CurrencyCoordinator/mcp_server/
+adk_agent/.venv/
+adk_agent/agent.log
+node_modules/
+*.log
+
