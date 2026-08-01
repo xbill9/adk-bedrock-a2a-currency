@@ -3,7 +3,7 @@ title: "Google ADK as the Master Agent, Calling Amazon Bedrock over A2A"
 published: false
 series: A2A
 tags: aiagent, googleadk, a2aprotocol, aws
-cover_image: devto-cover-adk-master.png
+cover_image: https://raw.githubusercontent.com/xbill9/adk-bedrock-a2a-currency/main/devto-cover-adk-master.png
 ---
 
 This is the third run of the same cross-cloud currency benchmark, and the first
